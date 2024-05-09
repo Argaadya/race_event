@@ -4,7 +4,7 @@ This repo consists of my personal project to collect and analyze multiple runnin
 
 <center><img src="asset/score_now_main_page.PNG"></center>
 
-# Phase 1: Web Scraping
+# [Phase 1: Web Scraping](https://rpubs.com/Argaadya/web_scraping_selenium)
 The first phase of the project is doing web scrapping to get all the race results from the website using [Selenium](https://selenium-python.readthedocs.io/installation.html). I have collected basic information on 84 events ranging from running events (marathon, half-marathon, 10k), duathlons, triathlons, cycling, etc. 
 
 <center><img src="asset/table_main_page.PNG"></center>
