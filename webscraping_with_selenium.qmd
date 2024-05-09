@@ -1,0 +1,408 @@
+---
+title: "Scraping Running Events From A Web Using Selenium"
+author: "Arga Adyatama"
+date: 2024-05-09
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: show
+    code-line-numbers: true
+    theme: journal
+editor: visual
+---
+
+# Introduction
+
+As a data analyst, one of our main competencies is to leverage data to give insight and raise awareness from our audience, be it our manager or the general public, toward certain issues. For example, one could raise awareness to public about the state of climate change using the temperature and other climate data. Other example would be to give insight about the customer behaviour in our company so that the marketing team can take a better approach to retain customers and increase sales. Sometimes, the data needed is not available in internally in our organization and we have to acquire them externally, mostly from the internet. Therefore, the ability to collect information from the internet is a great skill to have as a data analyst.
+
+The process of collecting data from a website is called `webscraping`. In this post we learn how to scrape a website using and example of a running event website collected from [Scorenow](http://results.scorenow.co.id/) using the [Selenium](https://selenium-python.readthedocs.io/installation.html) package in python.
+
+All source code and dataset for this article are provided on [my github repo](https://github.com/Argaadya/race_event).
+
+# Library
+
+```{python}
+# data wrangling
+import pandas as pd
+import re
+import numpy as np
+
+# webscraping with selenium
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+
+pd.set_option('display.max_columns', None)
+```
+
+# Prepare Webdriver
+
+Selenium will create a bot that run through a browser and scrape a website. You may need to install the browser first or simply download the driver. You can check the [available browsers that selenium can access](https://selenium-python.readthedocs.io/installation.html).
+
+Here, we will use the Google Chrome driver as our browser. The `headless` option is activated so that when the bot is running we don't need to open the google chrome window and the bot will simply run in the background.
+
+```{python}
+# Set Chrome options to run headlessly
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+
+# Initialize Chrome WebDriver with headless mode
+driver = webdriver.Chrome(options=chrome_options)
+
+# Set the maximum amount of time to wait for the element to be present
+wait = WebDriverWait(driver, 10)
+```
+
+Now let's focus on the webpage of [Scorenow](http://results.scorenow.co.id/) which you can access from http://results.scorenow.co.id/. Hopefully the website is still active by the time you are reading this post.
+
+![Scorenow Main Page](asset/score_now_main_page.png)
+
+The page contains of 3 main segments:
+
+- upcoming races
+- recent results
+- all race results
+
+we will collect all of the race event on the `all race results` segment using webscraping. First, you need to know how the website works. you may observe that the all race results only contains 20 races followed by next button on the bottom left side. Please click the next button.
+
+![Scorenow Main Page Bottom](asset/score_now_main_page_bottom.png)
+
+After you press the next button, now you can see that the all race results contains different events and you can also see that the domain has changed, from simply http://results.scorenow.co.id/ into http://results.scorenow.co.id/StartPage.aspx?CId=19723&From=21. The additional info `Cid` and `From` indicate additional parameter given to the website. What I am sure of is that the `From=21` means that the result on the right side display the race from row 21 to 40.
+
+![Scorenow Main Page Bottom](asset/score_now_main_page_next.png)
+
+Thus, we can conclude that the all result display events in range of 20 rows. Here we will create a sequence of number that start from 1 to 100 with increment of 20. This will be the input for our scraper to get all results from 1 to 100. If you check at the end of the all result segment you can get around 80 events by the time of this writing.
+
+```{python}
+start_page = list(range(1, 100, 20))
+
+start_page
+```
+
+# Scraping
+
+Let's start our scrapping journey.
+
+## Main Page
+
+We will collect all of the information on the all result segment, including:
+
+- logo of the event
+- name and location of the event
+- date of the event
+- hyperlink of the event
+
+First we will create an empty list to collect the data.
+
+```{python}
+event_date = []
+event_name = []
+event_img = []
+event_link = []
+```
+
+Now for an illustration, let's collect all event from row 1 to 20. You can check whether the link is valid.
+
+```{python}
+link_url = "http://results.scorenow.co.id/StartPage.aspx?CId=19723&From=" + str(start_page[0])
+
+link_url
+```
+
+Start by commanding the bot to go to the url using the `drive.get()` function.
+
+```{python}
+# open the page
+driver.get(link_url)
+```
+
+Next, we need to know what is the `id` or the identifier for the webpage elements that indicate the table of the result event. We can use inspect element by opening the link in a browser and right-click on the table. We get that the table has an id named `tblAllRaces`.
+
+![Inspect Element](asset/score_now_main_page_tbl_all_race.png)
+
+To make sure that we scrape the web only when the table is fullly loaded, we use the `wait.until()` and insert the ID name of the table. This function also allow us to get the information of the table.
+
+```{python}
+# wait until the id is present
+race_table = wait.until(EC.presence_of_element_located((By.ID, "tblAllRaces")))
+
+race_table
+```
+
+An html table has 2 main element: `tr` (table row) and `td` (table data). From the `race_table` we will collect all of the table row.
+
+```{python}
+rows = race_table.find_elements(By.TAG_NAME, "tr")
+```
+
+Next, from each row we will collect the information of each event by finding all of the `td` or the table data of each row. The following is an example of collecting the information from the first row. From the output of each column we can guess that the first column give us the date of the event while the second row give us the name and the location of the event as well. The third column give an empty string so we can ignore it.
+
+```{python}
+for row in rows[:5]:
+    columns = row.find_elements(By.TAG_NAME, "td")
+    
+    # print the text of each column
+    list(map(lambda x: x.text, columns))
+
+```
+
+Now how do we find the link for the image? Looking at the html structure of the table, we can observe that for each row (`tr`) there is 2 `td` with content and a single empty `td`. The image is located at the first `td` along with the event date. While the link for each race is located on the second `td` as the hyperlink for the name of the event.
+
+![Inspect Element To Find Image Source](asset/score_now_main_page_td.png)
+
+By clicking at the arrow for the first `td`, you can see the `img` or the image element. The image has a source or `src` to specific link, therefore we can get this link for the image.
+
+![Inspect Element To Find Image Source](asset/score_now_main_page_img.png)
+
+The following is the complete code to get all of the required information from the web. After you collected all of the data, you can combine the list into a single pandas dataframe.
+
+```{python}
+# collect info
+for row in rows:
+    columns = row.find_elements(By.TAG_NAME, "td")
+    
+    # get event date and event name
+    info_date = columns[0].text
+    info_name = columns[1].text
+
+    # get source or link of the image
+    info_img = columns[0].find_elements(By.TAG_NAME, "img")
+    info_img = info_img[0].get_attribute("src")
+
+    # get each race page link
+    info_link = columns[1].find_elements(By.TAG_NAME, "a")
+    info_link = info_link[0].get_attribute("href")
+
+    # append or combine the data into single list
+    event_date.append(info_date)
+    event_name.append(info_name)
+    event_img.append(info_img)
+    event_link.append(info_link)
+
+# create dataframe
+df_main_page = pd.DataFrame({ 'event_date' : event_date, 'name': event_name, 'img_url' : event_img, 'race_link' : event_link})
+
+# Split the event name and location
+df_main_page[['event_name', 'location']] = df_main_page['name'].str.split("\n", expand = True)
+
+# convert event date into proper datetime format
+df_main_page['event_date'] = pd.to_datetime(df_main_page['event_date'])
+
+df_main_page.head()
+```
+
+The full code that will loop all pages is as follows.
+
+```{python eval = F}
+
+event_date = []
+event_name = []
+event_img = []
+event_link = []
+
+for page in start_page:
+
+    link_url = "http://results.scorenow.co.id/StartPage.aspx?CId=19723&From=" + str(page)
+
+    # open the page
+    driver.get(link_url)
+
+    race_table = wait.until(EC.presence_of_element_located((By.ID, "tblAllRaces")))
+
+    rows = race_table.find_elements(By.TAG_NAME, "tr")
+    
+    # collect info
+    for row in rows:
+        columns = row.find_elements(By.TAG_NAME, "td")
+        info_date = columns[0].text
+        info_name = columns[1].text
+
+        info_img = columns[0].find_elements(By.TAG_NAME, "img")
+        info_img = info_img[0].get_attribute("src")
+
+        info_link = columns[1].find_elements(By.TAG_NAME, "a")
+        info_link = info_link[0].get_attribute("href")
+
+        event_date.append(info_date)
+        event_name.append(info_name)
+        event_img.append(info_img)
+        event_link.append(info_link)
+
+
+df_main_page = pd.DataFrame({ 'event_date' : event_date, 'name': event_name, 'img_url' : event_img, 'race_link' : event_link})
+
+df_main_page[['event_name', 'location']] = df_main_page['name'].str.split("\n", expand = True)
+
+df_main_page['event_date'] = pd.to_datetime(df_main_page['event_date'])
+
+# save the data
+df_main_page.to_csv('data_collected/main_page.csv', index = False)
+```
+
+By the time of this post published, the page has 84 events.
+
+```{python}
+df_main_page = pd.read_csv('data_collected/main_page.csv')
+
+df_main_page.info()
+```
+
+## Race Result Pages
+
+Now after you have mastered the basic of webscrapping, you can try to get the race result.
+
+```{python}
+df_main_page['race_link'][0]
+```
+
+![Race Result Page](asset/race_page.png)
+
+The page contains several information:
+
+- race category (half-marathon, 10k run, 5k run)
+- large logo of the event which may be different from the logo on the main page
+- race result table containing the position, name, finish time, and other relevant information
+
+You may challenge yourself to collect all of the race from the site. But if it is too challenging, you may try to scrape the first 20 events only. It is still a lot of data since typically a running event can have more than a thousands participants.
+
+The following is my script to scrape all of the races. You may come up with something more creative or simple. You may find errors or bugs along the way, e.g. a race result with no table or no categories. That's why my script contains several if else statement to handle such conditions.
+
+```{python eval = F}
+for race_page in df_main_page['race_link']:
+
+    # race name and event date for naming file
+    race_name = df_main_page[ df_main_page['race_link'] == race_page]['event_name'].iloc[0]
+    event_date = df_main_page[ df_main_page['race_link'] == race_page]['event_date'].iloc[0]
+    
+    # open the page
+    driver.get(race_page)
+
+    # collect large logo
+    logo_id = wait.until(EC.presence_of_element_located((By.ID, "ctl00_imgLargeLogo")))
+    info_logo = logo_id.get_attribute("src")
+
+    # how many categories
+    info_category = driver.find_elements(By.ID, "ctl00_Content_Main_divEvents")
+    info_category = info_category[0].find_elements(By.TAG_NAME, "li")
+    
+    if info_category == []:
+        info_category = [0]
+
+    for eid_event in range(len(info_category)):
+        
+        print( race_name + " -- Event " + str(eid_event))
+
+        link_url = race_page + "&Eid=" + str(eid_event+1)
+        driver.get(link_url)
+
+        # how many page
+        race_title = wait.until(EC.presence_of_element_located((By.ID, "ctl00_lblRaceName"))) 
+
+        info_n_page = driver.find_elements(By.ID, "ctl00_Content_Main_grdTopPager")
+
+        # if there is no page indicator, then only load the first page
+        if info_n_page == []:
+            n_page = 0
+        else:
+            info_n_page = info_n_page[0]
+            n_page = list( map(lambda x: x.text, info_n_page.find_elements(By.TAG_NAME, "td")) )        
+            n_page = [item for item in n_page if item != ""]
+
+            if n_page == []:
+                n_page = 1
+            else:
+                n_page = n_page[-1]
+                n_page = int(n_page)
+        
+        # check whether the page has a result table
+        main_tbl = driver.find_elements(By.ID, "ctl00_Content_Main_divGrid")
+        
+        if main_tbl != []:
+          first_row = main_tbl[0].find_elements(By.TAG_NAME, "tr")
+        else: 
+          first_row = []
+
+        # if the page doesn't have a result table, then no scraping occured
+        if first_row != []:
+          
+            # get the race category name from a sample of hyperlink
+            first_row = first_row[1]
+            first_row_url = list( map(lambda x: x.get_attribute("href"), first_row.find_elements(By.TAG_NAME, "a")) ) 
+            first_row_url = [item for item in first_row_url if re.search(r'myresult', item)]
+
+            if first_row_url != []:
+                driver.get(first_row_url[0])
+                category_name = driver.find_elements(By.ID, "ctl00_Content_Main_lblEvent")[0].text
+
+                # scraping each page
+                for table_page in range(n_page):
+
+                    print( '   Page ' + str(table_page + 1))
+
+                    link_url = race_page + "&Eid=" + str(eid_event+1) + "&dt=0&PageNo=" + str(table_page + 1)
+                    driver.get(link_url)
+
+                    race_tbl = wait.until(EC.presence_of_element_located((By.ID, "ctl00_Content_Main_divGrid")))
+                    
+                    data = []
+                    runner_id = []
+                    column_name = []
+                    
+                    # get column name
+                    rows = race_tbl.find_elements(By.TAG_NAME, "tr")[0]
+                    column_name_data = [cell.text for cell in rows.find_elements(By.TAG_NAME, "td")]
+                    column_name.append(column_name_data)
+                    column_name = column_name[0]
+                    
+                    # runner result data
+                    rows = race_tbl.find_elements(By.CLASS_NAME, "accordion-toggle")
+
+                    if rows == []:
+                        rows = race_tbl.find_elements(By.TAG_NAME, "tr")[1:]
+                    
+                    # Iterate over each row and extract the text from the cells
+                    for row in rows:
+                        row_data = [cell.text for cell in row.find_elements(By.TAG_NAME, "td")]
+                        data.append(row_data)
+
+                        # get runner ID
+                        each_row_url = list( map(lambda x: x.get_attribute("href"), row.find_elements(By.TAG_NAME, "a")) ) 
+                        each_row_url = [item for item in each_row_url if re.search(r'myresult', item)]
+
+                        if each_row_url == []: 
+                            each_row_url = ""
+                        else: 
+                            each_row_url = each_row_url[0]
+                            
+                        runner_id.append(each_row_url)
+                    
+                    # Create DataFrame from the remaining entries
+                    df = pd.DataFrame(data, columns=column_name) 
+                    df['race_name'] = race_name
+                    df['race_large_logo']  = info_logo
+                    df['race_category'] = category_name
+                    df['runner_id'] = runner_id
+                    df['race_link'] = race_page
+                    
+                    # Cleansing data
+                    df.rename({'Net Pos': 'Pos'},axis =1 ,inplace = True)
+                    df.reset_index(inplace = True, drop = True)
+
+                    # drop empty column name
+                    df.drop('', axis = 1, inplace = True)
+
+                    file_name = 'data_collected/race_result/' + event_date + '_' + race_name + '_' + category_name + '_page_' + str(table_page + 1) + '.csv'
+                    file_name = re.sub(':', '', file_name)
+
+                    df.to_csv(file_name, index = False)
+
+```
+
+# Conclusion
+
+Webscraping is an essential skill if we wish to gather information for analysis from external data on the web. If you wish to be an expert in webscraping, some basic html understanding is required since you will have to look at the html structure of the website that you want to scrape.
